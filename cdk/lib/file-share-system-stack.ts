@@ -125,6 +125,15 @@ export class FileShareSystemStack extends cdk.Stack {
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
+    // パスワードリセット試行記録用テーブル
+    const resetAttemptsTable = new dynamodb.Table(this, 'ResetAttemptsTable', {
+      partitionKey: { name: 'identifier', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // テンポラリなデータなのでスタック削除時に削除
+      timeToLiveAttribute: 'ttl',
+    });
+
     // Cognito User Pool: 社内ユーザー認証用
     const userPool = new cognito.UserPool(this, 'FileShareUserPool', {
       selfSignUpEnabled: false, // 管理者のみがユーザーを作成可能
@@ -212,6 +221,7 @@ export class FileShareSystemStack extends cdk.Stack {
         FILES_TABLE: filesTable.tableName,
         ACCESS_PERMISSIONS_TABLE: accessPermissionsTable.tableName,
         ACCESS_LOGS_TABLE: accessLogsTable.tableName,
+        RESET_ATTEMPT_TABLE: resetAttemptsTable.tableName,
         ALLOWED_IP_ADDRESSES: JSON.stringify(allowedIpAddresses),
       },
       timeout: cdk.Duration.seconds(30),

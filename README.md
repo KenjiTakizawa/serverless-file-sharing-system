@@ -123,6 +123,58 @@ Lambda関数が以下のAPIエンドポイントを処理します：
 - **/access**: アクセス権限管理
 - **/logs**: ログ管理
 
+## 環境変数設定
+
+システムの動作に必要な環境変数を以下に示します。
+
+### Lambda関数用環境変数
+
+CDKデプロイ時に自動的に設定されますが、手動デプロイ時には以下を設定してください：
+
+| 環境変数名 | 説明 | 必須 |
+| --- | --- | --- |
+| `USER_POOL_ID` | Cognito User PoolのID | ✅ |
+| `USER_POOL_CLIENT_ID` | Cognito User Pool ClientのID | ✅ |
+| `IDENTITY_POOL_ID` | Cognito Identity PoolのID | ✅ |
+| `FILE_STORAGE_BUCKET` | S3ファイルストレージバケット名 | ✅ |
+| `USERS_TABLE` | ユーザー情報用DynamoDBテーブル名 | ✅ |
+| `FILE_GROUPS_TABLE` | ファイルグループ用DynamoDBテーブル名 | ✅ |
+| `FILES_TABLE` | ファイルメタデータ用DynamoDBテーブル名 | ✅ |
+| `ACCESS_PERMISSIONS_TABLE` | アクセス許可用DynamoDBテーブル名 | ✅ |
+| `ACCESS_LOGS_TABLE` | アクセスログ用DynamoDBテーブル名 | ✅ |
+| `RESET_ATTEMPT_TABLE` | パスワードリセット試行記録用DynamoDBテーブル名 | ✅ |
+| `ALLOWED_IP_ADDRESSES` | 許可するIPアドレスの配列（JSON形式） | ✅ |
+| `AWS_REGION` | AWSリージョン | ✅ |
+
+### フロントエンド用環境変数
+
+`.env.local`ファイルに設定する必要があります：
+
+| 環境変数名 | 説明 | 必須 |
+| --- | --- | --- |
+| `REACT_APP_AWS_REGION` | AWSリージョン（例: ap-northeast-1） | ✅ |
+| `REACT_APP_USER_POOL_ID` | Cognito User PoolのID | ✅ |
+| `REACT_APP_USER_POOL_CLIENT_ID` | Cognito User Pool ClientのID | ✅ |
+| `REACT_APP_IDENTITY_POOL_ID` | Cognito Identity PoolのID | ✅ |
+| `REACT_APP_API_ENDPOINT` | API GatewayのURL | ✅ |
+| `REACT_APP_S3_BUCKET` | S3ファイルストレージバケット名 | ✅ |
+
+これらの値は、CDKデプロイ後にコンソールに出力される情報から取得できます。
+
+### DynamoDBテーブル設定
+
+レート制限機能を利用するために、以下のテーブル構成が必要です：
+
+#### reset_attemptsテーブル
+- パーティションキー: `identifier` (String)
+- ソートキー: `timestamp` (String)
+- その他の属性:
+  - `email`: ハッシュ化されたメールアドレス (String)
+  - `ip`: IPアドレス (String)
+  - `ttl`: 自動削除用のタイムスタンプ (Number)
+
+> **注意**: TTL機能を有効にするために、DynamoDBコンソールの各テーブルでTTL設定を有効化し、属性名を`ttl`に設定してください。
+
 ## セキュリティ対策
 
 システムには以下のセキュリティ機能が実装されています：
