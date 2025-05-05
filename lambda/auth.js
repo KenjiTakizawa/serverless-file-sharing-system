@@ -19,6 +19,11 @@ const USER_POOL_CLIENT_ID = process.env.USER_POOL_CLIENT_ID;
 const USERS_TABLE = process.env.USERS_TABLE;
 const ACCESS_LOGS_TABLE = process.env.ACCESS_LOGS_TABLE;
 
+// レート制限の設定
+const RATE_LIMIT_WINDOW_MINUTES = 15; // 15分間の時間枠
+const RATE_LIMIT_MAX_ATTEMPTS = 5; // 最大試行回数
+const RESET_ATTEMPT_TABLE = process.env.RESET_ATTEMPT_TABLE || 'reset_attempts'; // レート制限用のテーブル名
+
 /**
  * IPアドレスが許可リストに含まれているか確認
  * @param {string} ipAddress - チェックするIPアドレス
@@ -189,7 +194,33 @@ async function handleRequestPasswordReset(event, context) {
   const { email } = body;
   const sourceIp = event.requestContext.identity.sourceIp;
   
+  // レート制限チェック
+  const isRateLimited = await checkRateLimit(email, sourceIp);
+  if (isRateLimited) {
+    await logAccess({
+      action: 'PASSWORD_RESET_REQUEST',
+      email,
+      ipAddress: sourceIp,
+      userAgent: event.headers['User-Agent'],
+      isSuccess: false,
+      reason: 'RATE_LIMITED'
+    });
+    
+    return {
+      statusCode: 429, // Too Many Requests
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: '短時間に多数のリクエストがありました。しばらくしてから再試行してください。'
+      })
+    };
+  }
+  
   try {
+    // パスワードリセット試行を記録
+    await recordResetAttempt(email, sourceIp);
     // ユーザーの存在確認
     try {
       await cognitoIdentityServiceProvider.adminGetUser({
@@ -284,6 +315,30 @@ async function handleConfirmPasswordReset(event, context) {
   const { email, confirmationCode, newPassword } = body;
   const sourceIp = event.requestContext.identity.sourceIp;
   
+  // レート制限チェック
+  const isRateLimited = await checkRateLimit(email, sourceIp);
+  if (isRateLimited) {
+    await logAccess({
+      action: 'PASSWORD_RESET_CONFIRM',
+      email,
+      ipAddress: sourceIp,
+      userAgent: event.headers['User-Agent'],
+      isSuccess: false,
+      reason: 'RATE_LIMITED'
+    });
+    
+    return {
+      statusCode: 429, // Too Many Requests
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: '短時間に多数のリクエストがありました。しばらくしてから再試行してください。'
+      })
+    };
+  }
+  
   // パスワード複雑性チェック
   if (!validatePasswordComplexity(newPassword)) {
     return {
@@ -374,6 +429,68 @@ function validatePasswordComplexity(password) {
     .filter(Boolean).length;
   
   return validCategories >= 4;
+}
+
+/**
+ * パスワードリセットと確認のレート制限をチェック
+ * @param {string} email - メールアドレス
+ * @param {string} ipAddress - IPアドレス
+ * @returns {Promise<boolean>} - 制限対象かどうか
+ */
+async function checkRateLimit(email, ipAddress) {
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - RATE_LIMIT_WINDOW_MINUTES * 60 * 1000);
+  const emailHash = crypto.createHash('sha256').update(email).digest('hex');
+  const identifier = `${emailHash}:${ipAddress}`;
+  
+  try {
+    // 指定期間内の試行回数を取得
+    const params = {
+      TableName: RESET_ATTEMPT_TABLE,
+      KeyConditionExpression: 'identifier = :id AND timestamp > :start',
+      ExpressionAttributeValues: {
+        ':id': identifier,
+        ':start': windowStart.toISOString()
+      }
+    };
+    
+    const result = await dynamoDB.query(params).promise();
+    return result.Items.length >= RATE_LIMIT_MAX_ATTEMPTS;
+  } catch (error) {
+    console.error('Error checking rate limit:', error);
+    // エラーが発生した場合は安全側に倒して制限しない
+    return false;
+  }
+}
+
+/**
+ * パスワードリセット試行を記録
+ * @param {string} email - メールアドレス
+ * @param {string} ipAddress - IPアドレス
+ */
+async function recordResetAttempt(email, ipAddress) {
+  const now = new Date();
+  const ttl = Math.floor(now.getTime() / 1000) + RATE_LIMIT_WINDOW_MINUTES * 60 * 2; // 時間枠の2倍をTTLに設定
+  const emailHash = crypto.createHash('sha256').update(email).digest('hex');
+  const identifier = `${emailHash}:${ipAddress}`;
+  
+  try {
+    const params = {
+      TableName: RESET_ATTEMPT_TABLE,
+      Item: {
+        identifier,
+        timestamp: now.toISOString(),
+        email: emailHash,
+        ip: ipAddress,
+        ttl
+      }
+    };
+    
+    await dynamoDB.put(params).promise();
+  } catch (error) {
+    console.error('Error recording reset attempt:', error);
+    // 記録の失敗はユーザーの対語には影響させない
+  }
 }
 
 // エクスポート
