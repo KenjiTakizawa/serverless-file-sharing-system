@@ -1,0 +1,30 @@
+# ビルド成果物
+/build
+/dist
+
+# 依存パッケージ
+/node_modules
+
+# 環境変数
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# テストカバレッジ
+/coverage
+
+# 一時ファイル
+.DS_Store
+.idea
+.vscode
+*.swp
+*.swo
+
+# ログ
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# その他
+.eslintcache

@@ -1,0 +1,28 @@
+# 依存パッケージ
+/node_modules
+
+# 環境変数
+.env
+.env.local
+
+# パッケージロックファイル
+package-lock.json
+yarn.lock
+
+# テストカバレッジ
+/coverage
+
+# 一時ファイル
+.DS_Store
+.idea
+.vscode
+*.swp
+*.swo
+
+# ログ
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AWS認証情報
+credentials.json

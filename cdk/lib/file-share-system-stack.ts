@@ -210,7 +210,7 @@ export class FileShareSystemStack extends cdk.Stack {
     const apiHandler = new lambda.Function(this, 'FileShareApiHandler', {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: 'index.handler',
-      code: lambda.Code.fromAsset('lambda'), // コードは別途作成
+      code: lambda.Code.fromAsset('../lambda'), // コードは別途作成
       environment: {
         USER_POOL_ID: userPool.userPoolId,
         USER_POOL_CLIENT_ID: userPoolClient.userPoolClientId,
@@ -298,13 +298,27 @@ export class FileShareSystemStack extends cdk.Stack {
       })
     );
 
-    // API Gateway: RESTful API
+    // CloudWatch Logs用のIAMロールを作成
+    const apiGatewayCloudWatchRole = new iam.Role(this, 'ApiGatewayCloudWatchRole', {
+      assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonAPIGatewayPushToCloudWatchLogs')
+      ],
+    });
+    
+    // CloudWatch LogsロールをAPI Gatewayに設定するカスタムリソース
+    const apiGatewayAccount = new apigateway.CfnAccount(this, 'ApiGatewayAccount', {
+      cloudWatchRoleArn: apiGatewayCloudWatchRole.roleArn
+    });
+    
+    // API Gateway: RESTful API - ロギングは無効化
     const api = new apigateway.RestApi(this, 'FileShareAPI', {
       description: 'File Sharing System API',
       deployOptions: {
         stageName: 'v1',
-        loggingLevel: apigateway.MethodLoggingLevel.INFO,
-        dataTraceEnabled: true,
+        // ロギングは一時的に無効化
+        // loggingLevel: apigateway.MethodLoggingLevel.INFO,
+        // dataTraceEnabled: true,
       },
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
@@ -379,26 +393,32 @@ export class FileShareSystemStack extends cdk.Stack {
           priority: 1,
           action: { block: {} },
           statement: {
-            notStatement: {
-              statement: {
-                ipSetReferenceStatement: {
-                  arn: wafIpSet.attrArn,
+            andStatement: {
+              statements: [
+                {
+                  notStatement: {
+                    statement: {
+                      ipSetReferenceStatement: {
+                        arn: wafIpSet.attrArn,
+                      },
+                    },
+                  },
                 },
-              },
+                {
+                  byteMatchStatement: {
+                    fieldToMatch: { uriPath: {} },
+                    positionalConstraint: 'STARTS_WITH',
+                    searchString: '/users',
+                    textTransformations: [{ priority: 0, type: 'NONE' }],
+                  },
+                }
+              ],
             },
           },
           visibilityConfig: {
             cloudWatchMetricsEnabled: true,
             metricName: 'IPRestrictionRule',
             sampledRequestsEnabled: true,
-          },
-          scopeDownStatement: {
-            byteMatchStatement: {
-              fieldToMatch: { uriPath: {} },
-              positionalConstraint: 'STARTS_WITH',
-              searchString: '/users',
-              textTransformations: [{ priority: 0, type: 'NONE' }],
-            },
           },
         },
         // レートリミット（ブルートフォース対策）
@@ -422,16 +442,24 @@ export class FileShareSystemStack extends cdk.Stack {
     });
 
     // API Gateway WebACL関連付け
-    new waf.CfnWebACLAssociation(this, 'WebACLAssociation', {
-      resourceArn: `arn:aws:apigateway:${this.region}::/restapis/${api.restApiId}/stages/v1`,
+    // 注: API Gatewayが完全にデプロイされてから関連付けを行う必要がある
+    // 使用するARN形式を修正
+    const apiStage = api.deploymentStage;
+    
+    // 新しいWAFアソシエーション
+    const webAclAssociation = new waf.CfnWebACLAssociation(this, 'WebACLAssociation', {
+      resourceArn: `arn:aws:apigateway:${this.region}::/restapis/${api.restApiId}/stages/${apiStage.stageName}`,
       webAclArn: wafWebACL.attrArn,
     });
+    
+    // 明示的に依存関係を設定
+    webAclAssociation.addDependsOn(api.deploymentStage.node.defaultChild as cdk.CfnResource);
 
     // 自動削除Lambda
     const cleanupHandler = new lambda.Function(this, 'FileCleanupHandler', {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: 'cleanup.handler',
-      code: lambda.Code.fromAsset('lambda'), // コードは別途作成
+      code: lambda.Code.fromAsset('../lambda'), // コードは別途作成
       environment: {
         FILE_STORAGE_BUCKET: fileStorageBucket.bucketName,
         FILE_GROUPS_TABLE: fileGroupsTable.tableName,
@@ -586,12 +614,12 @@ export class FileShareSystemStack extends cdk.Stack {
       description: 'Endpoint URL of the API Gateway',
     });
 
-    new cdk.CfnOutput(this, 'FileStorageBucket', {
+    new cdk.CfnOutput(this, 'FileStorageBucketName', {
       value: fileStorageBucket.bucketName,
       description: 'Name of the S3 bucket for file storage',
     });
 
-    new cdk.CfnOutput(this, 'WebsiteBucket', {
+    new cdk.CfnOutput(this, 'WebsiteBucketName', {
       value: websiteBucket.bucketName,
       description: 'Name of the S3 bucket for website hosting',
     });

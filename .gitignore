@@ -1,17 +1,39 @@
 # 依存パッケージ
 node_modules/
+.npm
+.yarn/
+bower_components/
 
 # ビルド成果物
 dist/
 build/
 cdk.out/
+.serverless/
+.webpack/
+coverage/
+tmp/
+
+# AWS & CDK関連
+.cdk.staging/
+cdk.context.json
+.aws-sam/
 
 # 環境変数
 .env
 .env.local
+.env.development
+.env.test
+.env.production
 .env.development.local
 .env.test.local
 .env.production.local
+*.pem
+
+# AWS認証情報
+.aws/credentials
+aws-exports.js
+awsconfiguration.json
+amplifyconfiguration.json
 
 # ログ
 logs
@@ -19,13 +41,54 @@ logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
 
-# エディタ設定
+# キャッシュファイル
+.eslintcache
+.parcel-cache
+.cache/
+.next/
+.nuxt/
+.vuepress/dist
+.temp
+.docusaurus
+
+# エディタ・IDE設定
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-workspace
+.project
+.classpath
+.settings/
+*.code-workspace
 
 # OS関連
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ローカル設定ファイル
+.npmrc
+.yarnrc
+.prettierrc
+.prettierignore
+.eslintrc
+.eslintignore
+jsconfig.json
+
+# その他
+.vercel
+.fusebox/
+.dynamodb/
+.tern-port
+*.tsbuildinfo
+.history/
+.run/
+.grunt
+.lock-wscript

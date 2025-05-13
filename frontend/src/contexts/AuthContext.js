@@ -1,6 +1,6 @@
 // src/contexts/AuthContext.js
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import authService from '../services/AuthService';
+import { Auth } from 'aws-amplify';
 
 // 認証コンテキストの作成
 const AuthContext = createContext(null);
@@ -16,8 +16,8 @@ export const AuthProvider = ({ children }) => {
     const fetchCurrentUser = async () => {
       try {
         setLoading(true);
-        const { success, user } = await authService.getCurrentUser();
-        if (success && user) {
+        const user = await Auth.currentAuthenticatedUser();
+        if (user) {
           setCurrentUser(user);
         } else {
           setCurrentUser(null);
@@ -39,19 +39,13 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      const result = await authService.login(email, password);
-      
-      if (result.success) {
-        setCurrentUser(result.user);
-        return { success: true };
-      } else {
-        setError(result.message);
-        return { success: false, message: result.message };
-      }
+      const user = await Auth.signIn(email, password);
+      setCurrentUser(user);
+      return { success: true };
     } catch (err) {
       console.error('Login error:', err);
-      setError('ログインに失敗しました。');
-      return { success: false, message: 'ログインに失敗しました。' };
+      setError(err.message || 'ログインに失敗しました。');
+      return { success: false, message: err.message || 'ログインに失敗しました。' };
     } finally {
       setLoading(false);
     }
@@ -61,15 +55,9 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       setLoading(true);
-      const result = await authService.logout();
-      
-      if (result.success) {
-        setCurrentUser(null);
-        return { success: true };
-      } else {
-        setError(result.message);
-        return { success: false, message: result.message };
-      }
+      await Auth.signOut();
+      setCurrentUser(null);
+      return { success: true };
     } catch (err) {
       console.error('Logout error:', err);
       setError('ログアウトに失敗しました。');
@@ -84,17 +72,12 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      const result = await authService.requestPasswordReset(email);
-      
-      if (!result.success) {
-        setError(result.message);
-      }
-      
-      return result;
+      await Auth.forgotPassword(email);
+      return { success: true, message: 'パスワードリセット用のコードを送信しました。メールをご確認ください。' };
     } catch (err) {
       console.error('Password reset request error:', err);
-      setError('パスワードリセット要求に失敗しました。');
-      return { success: false, message: 'パスワードリセット要求に失敗しました。' };
+      setError(err.message || 'パスワードリセット要求に失敗しました。');
+      return { success: false, message: err.message || 'パスワードリセット要求に失敗しました。' };
     } finally {
       setLoading(false);
     }
@@ -105,17 +88,12 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      const result = await authService.confirmPasswordReset(email, code, newPassword);
-      
-      if (!result.success) {
-        setError(result.message);
-      }
-      
-      return result;
+      await Auth.forgotPasswordSubmit(email, code, newPassword);
+      return { success: true, message: 'パスワードのリセットが完了しました。新しいパスワードでログインしてください。' };
     } catch (err) {
       console.error('Password reset confirmation error:', err);
-      setError('パスワードリセットに失敗しました。');
-      return { success: false, message: 'パスワードリセットに失敗しました。' };
+      setError(err.message || 'パスワードリセットに失敗しました。');
+      return { success: false, message: err.message || 'パスワードリセットに失敗しました。' };
     } finally {
       setLoading(false);
     }

@@ -1,0 +1,6 @@
+@echo off
+echo Cleaning build directories...
+rmdir /s /q dist
+echo Creating fresh build directories...
+mkdir dist
+echo Build directories cleaned successfully.

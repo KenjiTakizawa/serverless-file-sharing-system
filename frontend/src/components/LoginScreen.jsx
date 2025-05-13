@@ -26,7 +26,7 @@ const LoginScreen = () => {
   // ビュー変更時にエラーをクリア
   useEffect(() => {
     setError('');
-    clearError();
+    if (clearError) clearError();
   }, [view, clearError]);
 
   const handleLogin = async (e) => {
@@ -319,8 +319,8 @@ const LoginScreen = () => {
               <p className="text-gray-600 text-sm mb-4">
                 パスワードの変更が完了しました。新しいパスワードでログインしてください。
               </p>
-              <div className="bg-green-50 text-green-800 p-4 rounded-md mb-6">
-                <div className="flex items-center text-sm">
+              <div className="bg-green-50 border border-green-200 rounded p-4 text-sm text-green-700 mb-6">
+                <div className="flex items-center">
                   <span className="mr-2">📧</span>
                   <span>登録されたメールアドレス: {resetEmail}</span>
                 </div>

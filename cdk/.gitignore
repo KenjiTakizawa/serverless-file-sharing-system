@@ -1,0 +1,33 @@
+# CDK関連の生成ファイル
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+.cdk.staging
+cdk.out
+
+# 環境変数
+.env
+.env.local
+
+# TypeScriptビルド成果物
+/dist
+/lib/**/*.js
+/lib/**/*.d.ts
+/bin/**/*.js
+/bin/**/*.d.ts
+
+# 依存パッケージ
+/node_modules
+
+# テスト関連
+/coverage
+
+# エディタ設定
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS関連
+.DS_Store

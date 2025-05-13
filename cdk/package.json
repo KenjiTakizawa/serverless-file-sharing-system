@@ -5,7 +5,8 @@
     "cdk": "bin/cdk.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run clean && tsc",
+    "clean": "cmd /c clean.bat",
     "watch": "tsc -w",
     "test": "jest",
     "cdk": "cdk",
