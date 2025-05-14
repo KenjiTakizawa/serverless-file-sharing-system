@@ -923,6 +923,168 @@ async function handleVerifyFileAccess(event, context) {
   }
 }
 
+/**
+ * ファイル保護設定を更新するハンドラー
+ * @param {Object} event - API Gateway event
+ * @param {Object} context - Lambda context
+ * @returns {Object} - レスポンス
+ */
+async function handleUpdateFileProtection(event, context) {
+  const userId = event.requestContext.authorizer.claims.sub;
+  const groupId = event.pathParameters.groupId;
+  const requestBody = JSON.parse(event.body);
+  const { password, ipRestrictions } = requestBody;
+  
+  try {
+    // ファイルグループ情報を取得
+    const groupParams = {
+      TableName: FILE_GROUPS_TABLE,
+      Key: {
+        groupId
+      }
+    };
+    
+    const groupResult = await dynamoDB.get(groupParams).promise();
+    const group = groupResult.Item;
+    
+    // グループが存在しないか、ユーザーが所有者でない場合はエラー
+    if (!group || group.userId !== userId) {
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          message: 'ファイルグループが見つかりません'
+        })
+      };
+    }
+    
+    // アクセス権限IDを取得
+    const accessPermissionId = group.accessPermissionId;
+    if (!accessPermissionId) {
+      return {
+        statusCode: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          message: 'ファイルグループのアクセス権限情報が取得できません'
+        })
+      };
+    }
+    
+    // パスワードの更新処理
+    if (password !== undefined) {
+      const passwordProtection = accessControl.createPasswordProtection(password);
+      const isPasswordProtected = passwordProtection.isPasswordProtected;
+      const passwordHash = passwordProtection.passwordHash;
+      const passwordSalt = passwordProtection.passwordSalt;
+      
+      // ファイルグループのパスワード保護状態を更新
+      const updateGroupParams = {
+        TableName: FILE_GROUPS_TABLE,
+        Key: {
+          groupId
+        },
+        UpdateExpression: 'set isPasswordProtected = :isPasswordProtected',
+        ExpressionAttributeValues: {
+          ':isPasswordProtected': isPasswordProtected
+        }
+      };
+      
+      await dynamoDB.update(updateGroupParams).promise();
+      
+      // アクセス権限からパスワードを更新
+      const updateAccessParams = {
+        TableName: ACCESS_PERMISSIONS_TABLE,
+        Key: {
+          permissionId: accessPermissionId
+        },
+        UpdateExpression: 'set passwordHash = :passwordHash, passwordSalt = :passwordSalt',
+        ExpressionAttributeValues: {
+          ':passwordHash': passwordHash,
+          ':passwordSalt': passwordSalt
+        }
+      };
+      
+      await dynamoDB.update(updateAccessParams).promise();
+    }
+    
+    // IP制限設定の更新処理
+    if (ipRestrictions) {
+      await accessControl.updateIpRestrictions(accessPermissionId, ipRestrictions);
+    }
+    
+    // 現在の設定を取得して返す
+    // アクセス権限情報を取得
+    const accessParams = {
+      TableName: ACCESS_PERMISSIONS_TABLE,
+      Key: {
+        permissionId: accessPermissionId
+      }
+    };
+    
+    const accessResult = await dynamoDB.get(accessParams).promise();
+    const accessInfo = accessResult.Item;
+    
+    // IP制限設定を取得
+    let currentIpRestrictions = null;
+    try {
+      const ipParams = {
+        TableName: process.env.IP_RESTRICTIONS_TABLE || 'ip-restrictions',
+        Key: {
+          permissionId: accessPermissionId
+        }
+      };
+      
+      const ipResult = await dynamoDB.get(ipParams).promise();
+      const ipInfo = ipResult.Item;
+      
+      if (ipInfo) {
+        currentIpRestrictions = {
+          enabled: ipInfo.enabled || false,
+          allowedIps: ipInfo.allowedIps || []
+        };
+      }
+    } catch (error) {
+      console.error('Error getting IP restrictions:', error);
+      // エラーは無視
+    }
+    
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        groupId,
+        isPasswordProtected: group.isPasswordProtected,
+        ipRestrictions: currentIpRestrictions,
+        message: 'ファイル保護設定が更新されました'
+      })
+    };
+    
+  } catch (error) {
+    console.error('Error updating file protection:', error);
+    
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: 'ファイル保護設定の更新に失敗しました',
+        error: error.message
+      })
+    };
+  }
+}
+
 module.exports = {
   handleCreateFileGroup,
   handleGetFileGroups,
@@ -931,5 +1093,6 @@ module.exports = {
   handleUpdateExpirationDate,
   handleGenerateUploadUrls,
   handleGenerateDownloadUrl,
-  handleVerifyFileAccess
+  handleVerifyFileAccess,
+  handleUpdateFileProtection
 };

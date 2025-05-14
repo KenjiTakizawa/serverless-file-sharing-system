@@ -4,6 +4,7 @@ import { useAuth, AuthProvider } from './contexts/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import Dashboard from './components/Dashboard';
 import SharePage from './components/SharePage'; // 共有ページのインポート
+import HtmlFileListPage from './components/HtmlFileListPage'; // HTMLファイルリストページのインポート
 import './lib/amplify-config'; // Amplify初期化を最初にインポート
 
 // プライベートルート（認証済みユーザーのみアクセス可能）
@@ -65,6 +66,12 @@ const App = () => {
           <Route path="/" element={
             <PrivateRoute>
               <Dashboard />
+            </PrivateRoute>
+          } />
+          {/* HTMLファイルリストページ用のルート */}
+          <Route path="/files" element={
+            <PrivateRoute>
+              <HtmlFileListPage />
             </PrivateRoute>
           } />
           {/* 共有リンク用のルート */}

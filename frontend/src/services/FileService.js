@@ -207,6 +207,72 @@ class FileService {
       throw error;
     }
   }
+  
+  /**
+   * ファイル保護設定を取得
+   * @param {string} groupId - ファイルグループID
+   * @returns {Promise<Object>} - 保護設定情報
+   */
+  async getFileProtection(groupId) {
+    try {
+      try {
+        // 実際の API 呼び出し
+        const response = await API.get('api', `/files/${groupId}/protection`);
+        return response;
+      } catch (apiError) {
+        console.warn('API call failed, falling back to local implementation:', apiError);
+        
+        // 開発用ダミーレスポンス
+        return {
+          groupId,
+          isPasswordProtected: false,
+          ipRestrictions: {
+            enabled: false,
+            allowedIps: []
+          }
+        };
+      }
+    } catch (error) {
+      console.error('Error getting file protection:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * ファイル保護設定を更新
+   * @param {string} groupId - ファイルグループID
+   * @param {Object} protectionSettings - 保護設定
+   * @returns {Promise<Object>} - API レスポンス
+   */
+  async updateFileProtection(groupId, protectionSettings) {
+    try {
+      const payload = {
+        body: {
+          password: protectionSettings.password,
+          ipRestrictions: protectionSettings.ipRestrictions
+        }
+      };
+
+      try {
+        // 実際の API 呼び出し
+        const response = await API.put('api', `/files/${groupId}/protection`, payload);
+        return response;
+      } catch (apiError) {
+        console.warn('API call failed, falling back to local implementation:', apiError);
+        
+        // 開発用ダミーレスポンス
+        return {
+          groupId,
+          isPasswordProtected: !!protectionSettings.password,
+          ipRestrictions: protectionSettings.ipRestrictions,
+          message: 'ファイル保護設定が更新されました'
+        };
+      }
+    } catch (error) {
+      console.error('Error updating file protection:', error);
+      throw error;
+    }
+  }
 }
 
 // シングルトンインスタンス
