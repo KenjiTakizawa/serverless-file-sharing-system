@@ -75,6 +75,12 @@ exports.handler = async (event, context) => {
       return await filesFunctions.handleGenerateDownloadUrl(event, context);
     }
     
+    // '/files/{groupId}/access' エンドポイントを処理
+    const accessMatch = path.match(/^\/files\/([\w-]+)\/access$/);
+    if (accessMatch && httpMethod === 'POST') {
+      return await filesFunctions.handleVerifyFileAccess(event, context);
+    }
+    
     // 一致するパスが見つからない場合は404を返す
     return {
       statusCode: 404,

@@ -1,6 +1,7 @@
 // lambda/files.js
 const AWS = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
+const accessControl = require('./accessControl');
 
 // AWSサービスのインスタンス化
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
@@ -55,12 +56,11 @@ async function handleCreateFileGroup(event, context) {
     const accessPermissionId = uuidv4();
     const accessUrl = groupId; // 共有URLの一部として使用
     
-    // パスワードのハッシュ化（本番環境では適切なハッシュ化が必要）
-    let passwordHash = null;
-    if (shareSettings.password) {
-      // 簡易的な実装（実際には適切なハッシュ関数を使用すべき）
-      passwordHash = Buffer.from(shareSettings.password).toString('base64');
-    }
+    // パスワード保護の設定
+    const passwordProtection = accessControl.createPasswordProtection(shareSettings.password);
+    const isPasswordProtected = passwordProtection.isPasswordProtected;
+    const passwordHash = passwordProtection.passwordHash;
+    const passwordSalt = passwordProtection.passwordSalt;
     
     // ファイルグループの保存
     const fileGroupParams = {
@@ -73,7 +73,7 @@ async function handleCreateFileGroup(event, context) {
         expirationDate: expirationDate.toISOString(),
         fileCount: files.length,
         totalSize: files.reduce((total, file) => total + parseInt(file.size), 0),
-        isPasswordProtected: !!passwordHash,
+        isPasswordProtected: isPasswordProtected,
         accessPermissionId
       }
     };
@@ -109,6 +109,7 @@ async function handleCreateFileGroup(event, context) {
         groupId,
         accessUrl,
         passwordHash,
+        passwordSalt,
         expirationDate: expirationDate.toISOString(),
         allowedEmails: shareSettings.allowedEmails || [],
         createdAt: now.toISOString(),
@@ -857,6 +858,71 @@ async function handleGenerateDownloadUrl(event, context) {
   }
 }
 
+/**
+ * ファイルアクセスの検証処理
+ * @param {Object} event - API Gateway event
+ * @param {Object} context - Lambda context
+ * @returns {Object} - レスポンス
+ */
+async function handleVerifyFileAccess(event, context) {
+  const groupId = event.pathParameters.groupId;
+  const requestBody = JSON.parse(event.body);
+  const { password } = requestBody;
+  const ipAddress = event.requestContext.identity?.sourceIp || 'unknown';
+  
+  try {
+    // パスワードの検証
+    const verifyResult = await accessControl.verifyFileAccess(groupId, password, ipAddress);
+    
+    if (verifyResult.success) {
+      // 認証成功
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          groupId: verifyResult.groupInfo.groupId,
+          message: verifyResult.message,
+          expirationDate: verifyResult.groupInfo.expirationDate
+        })
+      };
+    } else {
+      // 認証失敗
+      const statusCode = verifyResult.isLocked ? 403 : 401;
+      
+      return {
+        statusCode,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          message: verifyResult.message,
+          remainingAttempts: verifyResult.remainingAttempts,
+          isLocked: verifyResult.isLocked || false,
+          lockExpiry: verifyResult.lockExpiry || null
+        })
+      };
+    }
+  } catch (error) {
+    console.error('Error verifying file access:', error);
+    
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: 'ファイルアクセスの検証に失敗しました',
+        error: error.message
+      })
+    };
+  }
+}
+
 module.exports = {
   handleCreateFileGroup,
   handleGetFileGroups,
@@ -864,5 +930,6 @@ module.exports = {
   handleDeleteFileGroup,
   handleUpdateExpirationDate,
   handleGenerateUploadUrls,
-  handleGenerateDownloadUrl
+  handleGenerateDownloadUrl,
+  handleVerifyFileAccess
 };
