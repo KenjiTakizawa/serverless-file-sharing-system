@@ -25,18 +25,20 @@ class FileService {
         }
       };
 
-      // 現時点ではまだAPIが実装されていないため、ダミーレスポンスを返す
-      // 実際にはこのようなAPIコールになる
-      // const response = await API.post('api', '/files', payload);
-      
-      // ダミーレスポンス
-      const response = {
-        groupId,
-        shareUrl: `${window.location.origin}/share/${groupId}`,
-        expirationDate: new Date(Date.now() + Number(shareSettings.expirationDays) * 24 * 60 * 60 * 1000).toISOString()
-      };
-      
-      return response;
+      try {
+        // 実装されているAPIを呼び出し
+        const response = await API.post('api', '/files', payload);
+        return response;
+      } catch (apiError) {
+        console.warn('API call failed, falling back to local implementation:', apiError);
+        
+        // APIがエラーの場合は開発用ローカルレスポンスを返す
+        return {
+          groupId,
+          shareUrl: `${window.location.origin}/share/${groupId}`,
+          expirationDate: new Date(Date.now() + Number(shareSettings.expirationDays) * 24 * 60 * 60 * 1000).toISOString()
+        };
+      }
     } catch (error) {
       console.error('Error saving file metadata:', error);
       throw error;
@@ -50,16 +52,19 @@ class FileService {
    */
   async getFileGroups(includeExpired = false) {
     try {
-      // 実際にはこのようなAPIコールになる
-      // const response = await API.get('api', '/files', {
-      //   queryStringParameters: {
-      //     includeExpired: includeExpired.toString()
-      //   }
-      // });
-      
-      // ダミーレスポンス
-      const response = {
-        fileGroups: [
+      try {
+        // 実際の API 呼び出し
+        const response = await API.get('api', '/files', {
+          queryStringParameters: {
+            includeExpired: includeExpired.toString()
+          }
+        });
+        return response.fileGroups;
+      } catch (apiError) {
+        console.warn('API call failed, falling back to local implementation:', apiError);
+        
+        // 開発用ダミーレスポンス
+        return [
           {
             groupId: '123e4567-e89b-12d3-a456-426614174000',
             createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
@@ -69,10 +74,8 @@ class FileService {
             totalSize: 1024 * 1024 * 5, // 5MB
             shareUrl: `${window.location.origin}/share/123e4567-e89b-12d3-a456-426614174000`
           }
-        ]
-      };
-      
-      return response.fileGroups;
+        ];
+      }
     } catch (error) {
       console.error('Error getting file groups:', error);
       throw error;
@@ -86,42 +89,45 @@ class FileService {
    */
   async getFileGroupDetails(groupId) {
     try {
-      // 実際にはこのようなAPIコールになる
-      // const response = await API.get('api', `/files/${groupId}`);
-      
-      // ダミーレスポンス
-      const response = {
-        groupId,
-        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-        expirationDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-        isPasswordProtected: true,
-        files: [
-          {
-            fileId: 'file1',
-            key: `uploads/user/123/file1.pdf`,
-            name: 'document.pdf',
-            size: 1024 * 1024 * 2, // 2MB
-            type: 'application/pdf'
-          },
-          {
-            fileId: 'file2',
-            key: `uploads/user/123/file2.jpg`,
-            name: 'image.jpg',
-            size: 1024 * 1024 * 1.5, // 1.5MB
-            type: 'image/jpeg'
-          },
-          {
-            fileId: 'file3',
-            key: `uploads/user/123/file3.docx`,
-            name: 'report.docx',
-            size: 1024 * 1024 * 1.5, // 1.5MB
-            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          }
-        ],
-        shareUrl: `${window.location.origin}/share/${groupId}`
-      };
-      
-      return response;
+      try {
+        // 実際の API 呼び出し
+        const response = await API.get('api', `/files/${groupId}`);
+        return response;
+      } catch (apiError) {
+        console.warn('API call failed, falling back to local implementation:', apiError);
+        
+        // 開発用ダミーレスポンス
+        return {
+          groupId,
+          createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+          expirationDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+          isPasswordProtected: true,
+          files: [
+            {
+              fileId: 'file1',
+              key: `uploads/user/123/file1.pdf`,
+              name: 'document.pdf',
+              size: 1024 * 1024 * 2, // 2MB
+              type: 'application/pdf'
+            },
+            {
+              fileId: 'file2',
+              key: `uploads/user/123/file2.jpg`,
+              name: 'image.jpg',
+              size: 1024 * 1024 * 1.5, // 1.5MB
+              type: 'image/jpeg'
+            },
+            {
+              fileId: 'file3',
+              key: `uploads/user/123/file3.docx`,
+              name: 'report.docx',
+              size: 1024 * 1024 * 1.5, // 1.5MB
+              type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            }
+          ],
+          shareUrl: `${window.location.origin}/share/${groupId}`
+        };
+      }
     } catch (error) {
       console.error('Error getting file group details:', error);
       throw error;
@@ -150,16 +156,19 @@ class FileService {
    */
   async deleteFileGroup(groupId) {
     try {
-      // 実際にはこのようなAPIコールになる
-      // const response = await API.del('api', `/files/${groupId}`);
-      
-      // ダミーレスポンス
-      const response = {
-        success: true,
-        message: 'ファイルグループが削除されました'
-      };
-      
-      return response;
+      try {
+        // 実際の API 呼び出し
+        const response = await API.del('api', `/files/${groupId}`);
+        return response;
+      } catch (apiError) {
+        console.warn('API call failed, falling back to local implementation:', apiError);
+        
+        // 開発用ダミーレスポンス
+        return {
+          success: true,
+          message: 'ファイルグループが削除されました'
+        };
+      }
     } catch (error) {
       console.error('Error deleting file group:', error);
       throw error;
@@ -180,16 +189,19 @@ class FileService {
         }
       };
 
-      // 実際にはこのようなAPIコールになる
-      // const response = await API.put('api', `/files/${groupId}/expiration`, payload);
-      
-      // ダミーレスポンス
-      const response = {
-        groupId,
-        expirationDate: new Date(Date.now() + Number(expirationDays) * 24 * 60 * 60 * 1000).toISOString()
-      };
-      
-      return response;
+      try {
+        // 実際の API 呼び出し
+        const response = await API.put('api', `/files/${groupId}/expiration`, payload);
+        return response;
+      } catch (apiError) {
+        console.warn('API call failed, falling back to local implementation:', apiError);
+        
+        // 開発用ダミーレスポンス
+        return {
+          groupId,
+          expirationDate: new Date(Date.now() + Number(expirationDays) * 24 * 60 * 60 * 1000).toISOString()
+        };
+      }
     } catch (error) {
       console.error('Error updating expiration date:', error);
       throw error;

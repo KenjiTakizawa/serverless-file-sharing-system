@@ -1,8 +1,9 @@
 // src/components/FileUpload.jsx
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Storage } from 'aws-amplify';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../contexts/AuthContext';
+import fileService from '../services/FileService';
 
 const FileUpload = () => {
   const [files, setFiles] = useState([]);
@@ -18,10 +19,56 @@ const FileUpload = () => {
   
   const { currentUser } = useAuth();
   
+  // エラー更新のタイマーハンドル
+  const [errorTimer, setErrorTimer] = useState(null);
+  
+  // エラー表示が一定時間後に消えるようにする
+  useEffect(() => {
+    if (uploadResult && !uploadResult.success) {
+      const timer = setTimeout(() => {
+        setUploadResult(null);
+      }, 8000); // 8秒後にエラーを消す
+      
+      setErrorTimer(timer);
+      
+      return () => {
+        clearTimeout(timer);
+      };
+    }
+    
+    return () => {
+      if (errorTimer) {
+        clearTimeout(errorTimer);
+      }
+    };
+  }, [uploadResult, errorTimer]);
+  
+  // ファイルの最大サイズのチェック
+  const checkFilesSize = (files) => {
+    const maxTotalSize = 2 * 1024 * 1024 * 1024; // 2GB
+    let totalSize = 0;
+    
+    for (const file of files) {
+      totalSize += file.size;
+    }
+    
+    return totalSize <= maxTotalSize;
+  };
+  
   // ファイル選択時の処理
   const handleFileChange = (e) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files);
+      
+      // ファイルサイズのチェック
+      if (!checkFilesSize([...files, ...newFiles])) {
+        setUploadResult({
+          success: false,
+          message: 'ファイルの合計サイズが上限（2GB）を超えています。'
+        });
+        return;
+      }
+      
       setFiles(prevFiles => [...prevFiles, ...newFiles]);
     }
   };
@@ -33,9 +80,19 @@ const FileUpload = () => {
     
     if (e.dataTransfer.files) {
       const newFiles = Array.from(e.dataTransfer.files);
+      
+      // ファイルサイズのチェック
+      if (!checkFilesSize([...files, ...newFiles])) {
+        setUploadResult({
+          success: false,
+          message: 'ファイルの合計サイズが上限（2GB）を超えています。'
+        });
+        return;
+      }
+      
       setFiles(prevFiles => [...prevFiles, ...newFiles]);
     }
-  }, []);
+  }, [files]);
   
   // ドラッグオーバー時のデフォルト動作を防止
   const handleDragOver = useCallback((e) => {
@@ -142,13 +199,14 @@ const FileUpload = () => {
   
   // メタデータをAPIに保存
   const saveFileGroupMetadata = async (groupId, files, settings) => {
-    // ここで作成予定のAPI呼び出し - 現段階では簡易的な実装
-    console.log('メタデータの保存:', { groupId, files, settings });
-    
-    // ダミーレスポンス - 実際にはバックエンドからのレスポンスを返す
-    return {
-      shareUrl: `${window.location.origin}/share/${groupId}`
-    };
+    try {
+      // FileServiceを直接使用してメタデータを保存
+      const response = await fileService.saveFileGroupMetadata(groupId, files, settings);
+      return response;
+    } catch (error) {
+      console.error('Error saving metadata:', error);
+      throw error;
+    }
   };
   
   return (

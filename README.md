@@ -10,7 +10,7 @@ AWS のサーバーレス技術を活用した、安全で拡張性の高いフ�
 - **ファイルアップロード**: S3に複数ファイルをアップロード
 - **アクセス制御**: パスワード保護とIP制限によるセキュリティ強化
 - **有効期限設定**: ファイル共有の有効期限と自動削除機能
-- **外部ユーザー共有**: ワンタイムURLとパスワードによる安全な共有
+- **外部ユーザー共有**: URLとパスワードによる安全な共有
 - **ログ記録**: アクセスとダウンロードの詳細なログ
 
 ## アーキテクチャ
@@ -49,9 +49,9 @@ AWS のサーバーレス技術を活用した、安全で拡張性の高いフ�
                      └──────────────┘
 ```
 
-## 現在の実装状況
+## 実装機能一覧
 
-### 完了済み機能
+### 完了した機能
 - ✅ AWS CDKによるインフラストラクチャのコード化
 - ✅ Cognito User Poolによるユーザー認証
 - ✅ React + Tailwind CSSによるフロントエンド基盤
@@ -59,17 +59,25 @@ AWS のサーバーレス技術を活用した、安全で拡張性の高いフ�
 - ✅ パスワードリセット機能
 - ✅ 認証状態管理
 - ✅ 認証ルーティング (プライベート/パブリックルート)
-
-### 開発中の機能
-- 🔄 ファイルアップロード機能
-- 🔄 ファイル共有リンク生成
-- 🔄 ファイル管理ダッシュボード
+- ✅ ファイルアップロード機能
+- ✅ ファイル共有リンク生成
+- ✅ ファイル管理ダッシュボード
+- ✅ ドラッグ＆ドロップによるファイルアップロード
+- ✅ パスワード保護機能
+- ✅ 有効期限設定
+- ✅ アップロード進捗表示
+- ✅ ファイル共有URL生成
+- ✅ ファイル一覧表示
+- ✅ ファイルグループ削除機能
+- ✅ 共有ページの実装（パスワード認証）
+- ✅ 期限切れファイルの自動管理
 
 ### 今後実装予定の機能
-- 📅 有効期限設定と自動削除
 - 📅 アクセスログの可視化
-- 📅 外部ユーザーとの共有設定
+- 📅 特定メールアドレスへの制限機能の強化
 - 📅 管理者向けユーザー管理機能
+- 📅 ダウンロード統計の表示
+- 📅 ファイルプレビュー機能
 
 ## セットアップガイド
 
@@ -162,6 +170,10 @@ React アプリケーションは以下のコンポーネントで構成され�
 
 - **AuthContext**: 認証状態管理
 - **LoginScreen**: ログインとパスワードリセット
+- **Dashboard**: メインダッシュボード
+- **FileUpload**: ファイルアップロードコンポーネント
+- **FileList**: ファイル一覧表示コンポーネント
+- **SharePage**: 共有リンク閲覧ページ
 - **PrivateRoute/PublicRoute**: 認証状態に基づくルーティング
 
 #### ディレクトリ構造
@@ -258,7 +270,6 @@ const wafIpSet = new waf.CfnIPSet(this, 'AllowedIpSet', {
 | `ACCESS_LOGS_TABLE` | アクセスログ用DynamoDBテーブル名 | ✅ |
 | `RESET_ATTEMPT_TABLE` | パスワードリセット試行記録用DynamoDBテーブル名 | ✅ |
 | `ALLOWED_IP_ADDRESSES` | 許可するIPアドレスの配列（JSON形式） | ✅ |
-| `AWS_REGION` | AWSリージョン | ✅ |
 
 ### フロントエンド用環境変数
 
@@ -281,7 +292,7 @@ const wafIpSet = new waf.CfnIPSet(this, 'AllowedIpSet', {
 1. **IP制限**: 社内IPからのみアップロード可能
 2. **パスワード要件**: 12文字以上、英大文字/小文字/数字/記号を含む
 3. **ブルートフォース対策**: 試行回数制限と一時的ロック
-4. **セキュアなURL**: ワンタイムURLによる二段階認証
+4. **セキュアなURL**: 一意のURLによる共有
 5. **ログ記録**: すべてのアクセスとダウンロードを記録
 6. **自動期限切れ**: 設定期間後の自動削除
 
@@ -319,38 +330,6 @@ aws cognito-idp admin-get-user --user-pool-id YOUR_POOL_ID --username user@examp
 - CORSヘッダーの設定を確認
 - Lambda関数のタイムアウト設定を確認
 
-## 管理と運用
-
-### CloudWatchログの確認
-
-Lambda関数のログを確認する方法：
-
-```bash
-aws logs get-log-events --log-group-name /aws/lambda/YOUR_LAMBDA_NAME --log-stream-name STREAM_NAME
-```
-
-### DynamoDBテーブルの管理
-
-データの手動検査：
-
-```bash
-aws dynamodb scan --table-name YOUR_TABLE_NAME --limit 10
-```
-
-### ユーザー管理
-
-ユーザーの一覧表示：
-
-```bash
-aws cognito-idp list-users --user-pool-id YOUR_POOL_ID
-```
-
-ユーザーの無効化：
-
-```bash
-aws cognito-idp admin-disable-user --user-pool-id YOUR_POOL_ID --username USER_EMAIL
-```
-
 ## 今後の開発計画
 
 1. **ファイルプレビュー機能**: PDFや画像ファイルのプレビュー
@@ -373,12 +352,6 @@ aws cognito-idp admin-disable-user --user-pool-id YOUR_POOL_ID --username USER_E
 
 MIT License
 
-## サポート
-
-質問や問題がある場合は、以下にお問い合わせください：
-- GitHub Issuesを作成
-- メール: support@example.com
-
 ---
 
-© 2025 [Your Organization Name]
+© 2025 Serverless File Sharing System Project

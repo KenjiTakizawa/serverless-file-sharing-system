@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { useAuth, AuthProvider } from './contexts/AuthContext';
 import LoginScreen from './components/LoginScreen';
 import Dashboard from './components/Dashboard';
+import SharePage from './components/SharePage'; // 共有ページのインポート
 import './lib/amplify-config'; // Amplify初期化を最初にインポート
 
 // プライベートルート（認証済みユーザーのみアクセス可能）
@@ -45,6 +46,11 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
+// 共有ページは認証不要
+const ShareRoute = ({ children }) => {
+  return children;
+};
+
 // メインアプリケーション
 const App = () => {
   return (
@@ -60,6 +66,12 @@ const App = () => {
             <PrivateRoute>
               <Dashboard />
             </PrivateRoute>
+          } />
+          {/* 共有リンク用のルート */}
+          <Route path="/share/:accessUrl" element={
+            <ShareRoute>
+              <SharePage />
+            </ShareRoute>
           } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
