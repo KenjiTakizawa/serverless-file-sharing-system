@@ -43,6 +43,16 @@ exports.handler = async (event, context) => {
       return await filesFunctions.handleCreateFileGroup(event, context);
     }
     
+    // ファイル一覧取得
+    if (path === '/files' && httpMethod === 'GET') {
+      return await filesFunctions.handleGetFileGroups(event, context);
+    }
+    
+    // 署名付きアップロードURL生成エンドポイント
+    if (path === '/files/upload-urls' && httpMethod === 'POST') {
+      return await filesFunctions.handleGenerateUploadUrls(event, context);
+    }
+
     // '/files/{groupId}' エンドポイントを処理
     const groupIdMatch = path.match(/^\/files\/([\w-]+)$/);
     if (groupIdMatch) {
@@ -57,6 +67,12 @@ exports.handler = async (event, context) => {
     const expirationMatch = path.match(/^\/files\/([\w-]+)\/expiration$/);
     if (expirationMatch && httpMethod === 'PUT') {
       return await filesFunctions.handleUpdateExpirationDate(event, context);
+    }
+    
+    // '/files/download/{fileId}' エンドポイントを処理
+    const downloadMatch = path.match(/^\/files\/download\/([\w-]+)$/);
+    if (downloadMatch && httpMethod === 'GET') {
+      return await filesFunctions.handleGenerateDownloadUrl(event, context);
     }
     
     // 一致するパスが見つからない場合は404を返す

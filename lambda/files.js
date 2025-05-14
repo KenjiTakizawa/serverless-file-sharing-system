@@ -6,6 +6,26 @@ const { v4: uuidv4 } = require('uuid');
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 const s3 = new AWS.S3();
 
+// 定数定義
+const UPLOAD_URL_EXPIRATION = 15 * 60; // アップロード用URL有効期間（秒）: 15分
+const DOWNLOAD_URL_EXPIRATION = 60 * 60; // ダウンロード用URL有効期間（秒）: 1時間
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 最大ファイルサイズ: 100MB
+const ALLOWED_MIME_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+  'application/zip',
+  'application/x-rar-compressed'
+];
+
 // 環境変数からテーブル名などを取得
 const FILE_STORAGE_BUCKET = process.env.FILE_STORAGE_BUCKET;
 const FILE_GROUPS_TABLE = process.env.FILE_GROUPS_TABLE;
@@ -537,10 +557,312 @@ async function handleUpdateExpirationDate(event, context) {
   }
 }
 
+/**
+ * アップロード用の署名付きURL生成処理
+ * @param {Object} event - API Gateway event
+ * @param {Object} context - Lambda context
+ * @returns {Object} - レスポンス
+ */
+async function handleGenerateUploadUrls(event, context) {
+  const userId = event.requestContext.authorizer.claims.sub;
+  const requestBody = JSON.parse(event.body);
+  const { files } = requestBody;
+  
+  // リクエストの検証
+  if (!files || !Array.isArray(files) || files.length === 0) {
+    return {
+      statusCode: 400,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: '無効なリクエスト: filesは必須で少なくとも1つのファイル情報が必要です'
+      })
+    };
+  }
+  
+  try {
+    const urls = [];
+    const now = new Date();
+    
+    for (const file of files) {
+      // 必須フィールドの検証
+      if (!file.name || !file.type || !file.size) {
+        return {
+          statusCode: 400,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({
+            message: '無効なファイル情報: name, type, sizeは必須です'
+          })
+        };
+      }
+      
+      // ファイルサイズの制限
+      if (parseInt(file.size) > MAX_FILE_SIZE) {
+        return {
+          statusCode: 400,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({
+            message: `ファイルサイズが制限を超えています: 最大${MAX_FILE_SIZE/(1024*1024)}MB`
+          })
+        };
+      }
+      
+      // Content-Typeの検証
+      if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+        return {
+          statusCode: 400,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({
+            message: '非対応のファイル形式です',
+            allowedTypes: ALLOWED_MIME_TYPES
+          })
+        };
+      }
+      
+      // S3のキー（パス）を生成
+      const fileId = uuidv4();
+      const key = `${userId}/${fileId}/${file.name}`;
+      
+      // 署名付きURLの生成
+      const params = {
+        Bucket: FILE_STORAGE_BUCKET,
+        Key: key,
+        Expires: UPLOAD_URL_EXPIRATION,
+        ContentType: file.type,
+        // 追加のメタデータや制約を設定
+        Metadata: {
+          'original-filename': encodeURIComponent(file.name),
+          'user-id': userId,
+          'upload-date': now.toISOString()
+        }
+      };
+      
+      const uploadUrl = s3.getSignedUrl('putObject', params);
+      
+      urls.push({
+        fileId,
+        key,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        uploadUrl
+      });
+    }
+    
+    // アクセスログの記録（オプション）
+    // 実際の実装ではここでDynamoDBなどにログを残す処理を追加
+    
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        urls,
+        expiresIn: UPLOAD_URL_EXPIRATION
+      })
+    };
+    
+  } catch (error) {
+    console.error('Error generating upload URLs:', error);
+    
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: 'アップロード用URLの生成に失敗しました',
+        error: error.message
+      })
+    };
+  }
+}
+
+/**
+ * ダウンロード用の署名付きURL生成処理
+ * @param {Object} event - API Gateway event
+ * @param {Object} context - Lambda context
+ * @returns {Object} - レスポンス
+ */
+async function handleGenerateDownloadUrl(event, context) {
+  const userId = event.requestContext.authorizer.claims.sub;
+  const fileId = event.pathParameters.fileId;
+  
+  try {
+    // ファイル情報をDynamoDBから取得
+    const fileParams = {
+      TableName: FILES_TABLE,
+      Key: {
+        fileId
+      }
+    };
+    
+    const fileResult = await dynamoDB.get(fileParams).promise();
+    const file = fileResult.Item;
+    
+    if (!file) {
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          message: 'ファイルが見つかりません'
+        })
+      };
+    }
+    
+    // ファイルグループ情報を取得してアクセス権限を確認
+    const groupParams = {
+      TableName: FILE_GROUPS_TABLE,
+      Key: {
+        groupId: file.groupId
+      }
+    };
+    
+    const groupResult = await dynamoDB.get(groupParams).promise();
+    const group = groupResult.Item;
+    
+    if (!group) {
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          message: 'ファイルグループが見つかりません'
+        })
+      };
+    }
+    
+    // アクセス権限の確認
+    // 1. ファイルの所有者か確認
+    // 2. 共有設定に基づいたアクセス権限の確認
+    if (file.userId !== userId && group.userId !== userId) {
+      // ユーザーがファイルの所有者でない場合、共有の権限をチェック
+      const accessParams = {
+        TableName: ACCESS_PERMISSIONS_TABLE,
+        Key: {
+          permissionId: group.accessPermissionId
+        }
+      };
+      
+      const accessResult = await dynamoDB.get(accessParams).promise();
+      const accessInfo = accessResult.Item;
+      
+      // アクセス権限が存在しない、または期限切れの場合はエラー
+      if (!accessInfo || new Date(accessInfo.expirationDate) < new Date()) {
+        return {
+          statusCode: 403,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+          body: JSON.stringify({
+            message: 'このファイルにアクセスする権限がありません'
+          })
+        };
+      }
+      
+      // メールアドレスの制限がある場合はチェック
+      if (accessInfo.allowedEmails && accessInfo.allowedEmails.length > 0) {
+        const userEmail = event.requestContext.authorizer.claims.email;
+        if (!accessInfo.allowedEmails.includes(userEmail)) {
+          return {
+            statusCode: 403,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+              message: 'このファイルにアクセスする権限がありません'
+            })
+          };
+        }
+      }
+    }
+    
+    // 署名付きURLの生成
+    const params = {
+      Bucket: FILE_STORAGE_BUCKET,
+      Key: file.key,
+      Expires: DOWNLOAD_URL_EXPIRATION,
+      ResponseContentDisposition: `attachment; filename="${encodeURIComponent(file.originalName)}"`,
+      ResponseContentType: file.contentType
+    };
+    
+    const downloadUrl = s3.getSignedUrl('getObject', params);
+    
+    // アクセスログの記録
+    const logEntry = {
+      fileId,
+      userId: userId,
+      accessTime: new Date().toISOString(),
+      action: 'download',
+      ipAddress: event.requestContext.identity?.sourceIp || 'unknown',
+      userAgent: event.headers['User-Agent'] || 'unknown'
+    };
+    
+    console.log('File access log:', JSON.stringify(logEntry));
+    
+    // 実際の実装ではDynamoDBにログを保存する処理を追加
+    // 例: ACCESS_LOGS_TABLE などのテーブルに保存
+    
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        fileId,
+        fileName: file.originalName,
+        contentType: file.contentType,
+        size: file.size,
+        downloadUrl,
+        expiresIn: DOWNLOAD_URL_EXPIRATION
+      })
+    };
+    
+  } catch (error) {
+    console.error('Error generating download URL:', error);
+    
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: 'ダウンロード用URLの生成に失敗しました',
+        error: error.message
+      })
+    };
+  }
+}
+
 module.exports = {
   handleCreateFileGroup,
   handleGetFileGroups,
   handleGetFileGroupDetails,
   handleDeleteFileGroup,
-  handleUpdateExpirationDate
+  handleUpdateExpirationDate,
+  handleGenerateUploadUrls,
+  handleGenerateDownloadUrl
 };
