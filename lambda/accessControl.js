@@ -10,6 +10,7 @@ const FILE_GROUPS_TABLE = process.env.FILE_GROUPS_TABLE;
 const ACCESS_PERMISSIONS_TABLE = process.env.ACCESS_PERMISSIONS_TABLE;
 const ACCESS_ATTEMPTS_TABLE = process.env.ACCESS_ATTEMPTS_TABLE;
 const IP_RESTRICTIONS_TABLE = process.env.IP_RESTRICTIONS_TABLE || 'ip-restrictions';
+const ACCESS_LOGS_TABLE = process.env.ACCESS_LOGS_TABLE || 'file-access-logs';
 
 // 認証関連の設定
 const MAX_LOGIN_ATTEMPTS = 5; // 最大試行回数
@@ -858,11 +859,157 @@ async function updateIpRestrictions(permissionId, ipRestrictions) {
   }
 }
 
+/**
+ * アクセスログを記録する関数
+ * @param {string} groupId - ファイルグループID
+ * @param {string} fileId - ファイルID（該当する場合）
+ * @param {string} userId - ユーザーID（認証されている場合）
+ * @param {string} ipAddress - アクセス元IPアドレス
+ * @param {string} action - アクション（例：'download', 'view', 'verify'）
+ * @param {Object} metadata - 追加のメタデータ
+ * @returns {Promise<Object>} - 記録されたログエントリ
+ */
+async function recordAccessLog(groupId, fileId, userId, ipAddress, action, metadata = {}) {
+  try {
+    const now = new Date();
+    const logId = `${groupId}:${now.getTime()}:${Math.random().toString(36).substring(2, 15)}`;
+    
+    const logEntry = {
+      logId,
+      groupId,
+      timestamp: now.toISOString(),
+      ipAddress: ipAddress || 'unknown',
+      userId: userId || 'anonymous',
+      action: action || 'access',
+      ...metadata
+    };
+    
+    // fileIdが指定されている場合は追加
+    if (fileId) {
+      logEntry.fileId = fileId;
+    }
+    
+    // DynamoDBにログを保存
+    const params = {
+      TableName: ACCESS_LOGS_TABLE,
+      Item: logEntry
+    };
+    
+    await dynamoDB.put(params).promise();
+    
+    return logEntry;
+  } catch (error) {
+    console.error('Error recording access log:', error);
+    // ログ記録のエラーはスローせず、静かに失敗する
+    return null;
+  }
+}
+
+/**
+ * ファイルグループのアクセスログを取得する関数
+ * @param {string} groupId - ファイルグループID
+ * @param {number} limit - 取得するログの最大数
+ * @param {string} startKey - ページネーションの開始キー
+ * @returns {Promise<Object>} - ログエントリと次のページキー
+ */
+async function getAccessLogs(groupId, limit = 50, startKey = null) {
+  try {
+    const params = {
+      TableName: ACCESS_LOGS_TABLE,
+      IndexName: 'GroupIdIndex', // GroupIdによるインデックス（DynamoDBで作成する必要あり）
+      KeyConditionExpression: 'groupId = :groupId',
+      ExpressionAttributeValues: {
+        ':groupId': groupId
+      },
+      ScanIndexForward: false, // 降順（最新のログを先に取得）
+      Limit: limit
+    };
+    
+    // ページネーションがある場合
+    if (startKey) {
+      params.ExclusiveStartKey = JSON.parse(Buffer.from(startKey, 'base64').toString());
+    }
+    
+    const result = await dynamoDB.query(params).promise();
+    
+    // 次のページキーがある場合はエンコード
+    let nextKey = null;
+    if (result.LastEvaluatedKey) {
+      nextKey = Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64');
+    }
+    
+    return {
+      logs: result.Items,
+      nextKey
+    };
+  } catch (error) {
+    console.error('Error getting access logs:', error);
+    throw error;
+  }
+}
+
+/**
+ * 特定期間のアクセスログをエクスポートする関数
+ * @param {string} groupId - ファイルグループID
+ * @param {string} startDate - 開始日（ISO 8601形式）
+ * @param {string} endDate - 終了日（ISO 8601形式）
+ * @returns {Promise<Array>} - ログエントリの配列
+ */
+async function exportAccessLogs(groupId, startDate, endDate) {
+  try {
+    // 日付の検証
+    const start = startDate ? new Date(startDate) : new Date(0); // 開始日が指定されていない場合はエポック時間
+    const end = endDate ? new Date(endDate) : new Date(); // 終了日が指定されていない場合は現在時刻
+    
+    // フォーマットされた日付文字列
+    const startDateStr = start.toISOString();
+    const endDateStr = end.toISOString();
+    
+    const logs = [];
+    let lastEvaluatedKey = null;
+    
+    // ページネーションを使用して全ログを取得
+    do {
+      const params = {
+        TableName: ACCESS_LOGS_TABLE,
+        IndexName: 'GroupIdIndex',
+        KeyConditionExpression: 'groupId = :groupId AND #ts BETWEEN :start AND :end',
+        ExpressionAttributeNames: {
+          '#ts': 'timestamp'
+        },
+        ExpressionAttributeValues: {
+          ':groupId': groupId,
+          ':start': startDateStr,
+          ':end': endDateStr
+        },
+        Limit: 1000 // 一度に取得する最大数
+      };
+      
+      if (lastEvaluatedKey) {
+        params.ExclusiveStartKey = lastEvaluatedKey;
+      }
+      
+      const result = await dynamoDB.query(params).promise();
+      logs.push(...result.Items);
+      
+      lastEvaluatedKey = result.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+    
+    return logs;
+  } catch (error) {
+    console.error('Error exporting access logs:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   hashPassword,
   verifyPassword,
   verifyFileAccess,
   createPasswordProtection,
   checkIpRestriction,
-  updateIpRestrictions
+  updateIpRestrictions,
+  recordAccessLog,
+  getAccessLogs,
+  exportAccessLogs
 };

@@ -661,8 +661,19 @@ async function handleGenerateUploadUrls(event, context) {
       });
     }
     
-    // アクセスログの記録（オプション）
-    // 実際の実装ではここでDynamoDBなどにログを残す処理を追加
+    // アクセスログの記録
+    await accessControl.recordAccessLog(
+      groupId,
+      null, // ファイルID（複数ファイルアップロードなのでnull）
+      userId,
+      event.requestContext.identity?.sourceIp || 'unknown',
+      'create_group',
+      {
+        fileCount: files.length,
+        totalSize: files.reduce((total, file) => total + parseInt(file.size), 0),
+        userAgent: event.headers['User-Agent'] || 'unknown'
+      }
+    );
     
     return {
       statusCode: 200,
@@ -811,19 +822,20 @@ async function handleGenerateDownloadUrl(event, context) {
     const downloadUrl = s3.getSignedUrl('getObject', params);
     
     // アクセスログの記録
-    const logEntry = {
+    await accessControl.recordAccessLog(
+      group.groupId,
       fileId,
-      userId: userId,
-      accessTime: new Date().toISOString(),
-      action: 'download',
-      ipAddress: event.requestContext.identity?.sourceIp || 'unknown',
-      userAgent: event.headers['User-Agent'] || 'unknown'
-    };
-    
-    console.log('File access log:', JSON.stringify(logEntry));
-    
-    // 実際の実装ではDynamoDBにログを保存する処理を追加
-    // 例: ACCESS_LOGS_TABLE などのテーブルに保存
+      userId,
+      event.requestContext.identity?.sourceIp || 'unknown',
+      'download',
+      {
+        fileName: file.originalName,
+        contentType: file.contentType,
+        size: file.size,
+        userAgent: event.headers['User-Agent'] || 'unknown',
+        status: 'success'
+      }
+    );
     
     return {
       statusCode: 200,
@@ -875,22 +887,50 @@ async function handleVerifyFileAccess(event, context) {
     const verifyResult = await accessControl.verifyFileAccess(groupId, password, ipAddress);
     
     if (verifyResult.success) {
-      // 認証成功
-      return {
-        statusCode: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        },
-        body: JSON.stringify({
-          groupId: verifyResult.groupInfo.groupId,
-          message: verifyResult.message,
-          expirationDate: verifyResult.groupInfo.expirationDate
-        })
-      };
+      // アクセスログを記録
+      await accessControl.recordAccessLog(
+      groupId,
+      null, // ファイルIDはなし
+      null, // 認証前なのでユーザーIDなし
+      ipAddress,
+      'verify_access',
+      {
+      success: true,
+      userAgent: event.headers['User-Agent'] || 'unknown'
+      }
+      );
+      
+    // 認証成功
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        groupId: verifyResult.groupInfo.groupId,
+        message: verifyResult.message,
+        expirationDate: verifyResult.groupInfo.expirationDate
+      })
+    };
     } else {
       // 認証失敗
       const statusCode = verifyResult.isLocked ? 403 : 401;
+      
+      // アクセスログを記録
+      await accessControl.recordAccessLog(
+        groupId,
+        null, // ファイルIDはなし
+        null, // 認証前なのでユーザーIDなし
+        ipAddress,
+        'verify_access',
+        {
+          success: false,
+          reason: verifyResult.message,
+          isLocked: verifyResult.isLocked || false,
+          userAgent: event.headers['User-Agent'] || 'unknown'
+        }
+      );
       
       return {
         statusCode,
@@ -1085,6 +1125,182 @@ async function handleUpdateFileProtection(event, context) {
   }
 }
 
+/**
+ * ファイルグループのアクセスログを取得するハンドラー
+ * @param {Object} event - API Gateway event
+ * @param {Object} context - Lambda context
+ * @returns {Object} - レスポンス
+ */
+async function handleGetAccessLogs(event, context) {
+  const userId = event.requestContext.authorizer.claims.sub;
+  const groupId = event.pathParameters.groupId;
+  const limit = event.queryStringParameters?.limit ? parseInt(event.queryStringParameters.limit) : 50;
+  const startKey = event.queryStringParameters?.startKey || null;
+  
+  try {
+    // ファイルグループ情報を取得
+    const groupParams = {
+      TableName: FILE_GROUPS_TABLE,
+      Key: {
+        groupId
+      }
+    };
+    
+    const groupResult = await dynamoDB.get(groupParams).promise();
+    const group = groupResult.Item;
+    
+    // グループが存在しないか、ユーザーが所有者でない場合はエラー
+    if (!group || group.userId !== userId) {
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          message: 'ファイルグループが見つかりません'
+        })
+      };
+    }
+    
+    // ログの取得
+    const logsResult = await accessControl.getAccessLogs(groupId, limit, startKey);
+    
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        logs: logsResult.logs,
+        nextKey: logsResult.nextKey
+      })
+    };
+    
+  } catch (error) {
+    console.error('Error getting access logs:', error);
+    
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: 'アクセスログの取得に失敗しました',
+        error: error.message
+      })
+    };
+  }
+}
+
+/**
+ * アクセスログをエクスポートするハンドラー
+ * @param {Object} event - API Gateway event
+ * @param {Object} context - Lambda context
+ * @returns {Object} - レスポンス
+ */
+async function handleExportAccessLogs(event, context) {
+  const userId = event.requestContext.authorizer.claims.sub;
+  const groupId = event.pathParameters.groupId;
+  const requestBody = JSON.parse(event.body || '{}');
+  const { startDate, endDate, format = 'json' } = requestBody;
+  
+  try {
+    // ファイルグループ情報を取得
+    const groupParams = {
+      TableName: FILE_GROUPS_TABLE,
+      Key: {
+        groupId
+      }
+    };
+    
+    const groupResult = await dynamoDB.get(groupParams).promise();
+    const group = groupResult.Item;
+    
+    // グループが存在しないか、ユーザーが所有者でない場合はエラー
+    if (!group || group.userId !== userId) {
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+          message: 'ファイルグループが見つかりません'
+        })
+      };
+    }
+    
+    // ログのエクスポート
+    const logs = await accessControl.exportAccessLogs(groupId, startDate, endDate);
+    
+    // CSVフォーマットを要求された場合
+    if (format.toLowerCase() === 'csv') {
+      // CSVヘッダーを作成
+      const headers = [
+        'Timestamp', 'User ID', 'IP Address', 'Action', 
+        'File ID', 'User Agent', 'Status'
+      ];
+      
+      // データの加工
+      const rows = logs.map(log => [
+        log.timestamp,
+        log.userId || 'anonymous',
+        log.ipAddress || 'unknown',
+        log.action || 'access',
+        log.fileId || '',
+        log.userAgent || '',
+        log.status || ''
+      ]);
+      
+      // CSV形式に変換
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      ].join('\n');
+      
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': `attachment; filename="access_logs_${groupId}.csv"`,
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: csvContent
+      };
+    }
+    
+    // デフォルトはJSON形式
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        logs
+      })
+    };
+    
+  } catch (error) {
+    console.error('Error exporting access logs:', error);
+    
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+      body: JSON.stringify({
+        message: 'アクセスログのエクスポートに失敗しました',
+        error: error.message
+      })
+    };
+  }
+}
+
 module.exports = {
   handleCreateFileGroup,
   handleGetFileGroups,
@@ -1094,5 +1310,7 @@ module.exports = {
   handleGenerateUploadUrls,
   handleGenerateDownloadUrl,
   handleVerifyFileAccess,
-  handleUpdateFileProtection
+  handleUpdateFileProtection,
+  handleGetAccessLogs,
+  handleExportAccessLogs
 };

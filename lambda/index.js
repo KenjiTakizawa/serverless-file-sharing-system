@@ -81,6 +81,22 @@ exports.handler = async (event, context) => {
       return await filesFunctions.handleVerifyFileAccess(event, context);
     }
     
+    // '/files/{groupId}/protection' エンドポイントを処理
+    const protectionMatch = path.match(/^\/files\/([\w-]+)\/protection$/);
+    if (protectionMatch && httpMethod === 'PUT') {
+      return await filesFunctions.handleUpdateFileProtection(event, context);
+    }
+    
+    // '/files/{groupId}/logs' エンドポイントを処理（新規追加）
+    const logsMatch = path.match(/^\/files\/([\w-]+)\/logs$/);
+    if (logsMatch) {
+      if (httpMethod === 'GET') {
+        return await filesFunctions.handleGetAccessLogs(event, context);
+      } else if (httpMethod === 'POST') {
+        return await filesFunctions.handleExportAccessLogs(event, context);
+      }
+    }
+    
     // 一致するパスが見つからない場合は404を返す
     return {
       statusCode: 404,
