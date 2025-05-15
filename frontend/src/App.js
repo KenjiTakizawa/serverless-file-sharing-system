@@ -2,7 +2,8 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth, AuthProvider } from './contexts/AuthContext';
 import LoginScreen from './components/LoginScreen';
-import Dashboard from './components/Dashboard';
+import Dashboard from './pages/Dashboard';
+import FileGroupDetail from './pages/FileGroupDetail';
 import SharePage from './components/SharePage'; // 共有ページのインポート
 import HtmlFileListPage from './components/HtmlFileListPage'; // HTMLファイルリストページのインポート
 import './lib/amplify-config'; // Amplify初期化を最初にインポート
@@ -72,6 +73,12 @@ const App = () => {
           <Route path="/files" element={
             <PrivateRoute>
               <HtmlFileListPage />
+            </PrivateRoute>
+          } />
+          {/* ファイルグループ詳細ページ用のルート */}
+          <Route path="/file/:groupId" element={
+            <PrivateRoute>
+              <FileGroupDetail />
             </PrivateRoute>
           } />
           {/* 共有リンク用のルート */}
