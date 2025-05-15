@@ -661,13 +661,14 @@ async function handleGenerateUploadUrls(event, context) {
       });
     }
     
-    // アクセスログの記録
+    // アクセスログの記録（ここではグループIDがないので一時IDを生成）
+    const tempGroupId = `temp_${uuidv4()}`;
     await accessControl.recordAccessLog(
-      groupId,
+      tempGroupId,
       null, // ファイルID（複数ファイルアップロードなのでnull）
       userId,
       event.requestContext.identity?.sourceIp || 'unknown',
-      'create_group',
+      'upload_url_generation',
       {
         fileCount: files.length,
         totalSize: files.reduce((total, file) => total + parseInt(file.size), 0),
