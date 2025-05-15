@@ -1,5 +1,6 @@
 // src/services/FileService.js
 import { API, Storage } from 'aws-amplify';
+import { v4 as uuidv4 } from 'uuid';
 
 class FileService {
   /**
@@ -206,6 +207,102 @@ class FileService {
       console.error('Error updating expiration date:', error);
       throw error;
     }
+  }
+  
+  /**
+   * ファイルをS3にアップロード
+   * @param {File} file - アップロードするファイル
+   * @param {string} userId - ユーザーID
+   * @param {string} groupId - ファイルグループID
+   * @param {function} progressCallback - 進捗コールバック関数
+   * @returns {Promise<Object>} - アップロード結果
+   */
+  async uploadFile(file, userId, groupId, progressCallback = null) {
+    try {
+      const fileId = uuidv4();
+      const extension = this.getFileExtension(file.name);
+      const key = `uploads/${userId}/${groupId}/${fileId}.${extension}`;
+      
+      // S3にアップロード
+      const uploadResult = await Storage.put(key, file, {
+        contentType: file.type,
+        progressCallback: progressCallback,
+        metadata: {
+          fileId,
+          groupId,
+          originalName: file.name,
+          contentType: file.type,
+          size: file.size.toString()
+        }
+      });
+      
+      return {
+        fileId,
+        key,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        uploadResult
+      };
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * 複数のファイルをS3にアップロード
+   * @param {Array} files - アップロードするファイルの配列
+   * @param {string} userId - ユーザーID
+   * @param {string} groupId - ファイルグループID
+   * @param {function} progressCallback - 進捗コールバック関数 (index, progress) => void
+   * @param {function} cancelCheckCallback - キャンセルチェックコールバック関数 () => boolean
+   * @returns {Promise<Array>} - アップロード結果の配列
+   */
+  async uploadMultipleFiles(files, userId, groupId = null, progressCallback = null, cancelCheckCallback = null) {
+    try {
+      // グループIDがない場合は生成
+      if (!groupId) {
+        groupId = uuidv4();
+      }
+      
+      const uploadedFiles = [];
+      
+      // ファイルごとにアップロード
+      for (let i = 0; i < files.length; i++) {
+        // キャンセルチェック
+        if (cancelCheckCallback && cancelCheckCallback()) {
+          throw new Error('Upload canceled by user');
+        }
+        
+        const file = files[i];
+        const uploadProgress = (progress) => {
+          if (progressCallback) {
+            progressCallback(i, progress);
+          }
+        };
+        
+        const fileResult = await this.uploadFile(file, userId, groupId, uploadProgress);
+        uploadedFiles.push(fileResult);
+      }
+      
+      return {
+        groupId,
+        files: uploadedFiles
+      };
+    } catch (error) {
+      console.error('Error uploading multiple files:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * ファイルの拡張子を取得
+   * @param {string} filename - ファイル名
+   * @returns {string} - 拡張子
+   */
+  getFileExtension(filename) {
+    return filename.slice((filename.lastIndexOf(".") - 1 >>> 0) + 2);
   }
   
   /**

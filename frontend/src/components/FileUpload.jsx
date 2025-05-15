@@ -1,15 +1,17 @@
 // src/components/FileUpload.jsx
-import React, { useState, useCallback, useEffect } from 'react';
-import { Storage } from 'aws-amplify';
+import React, { useState, useEffect, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from '../contexts/AuthContext';
 import fileService from '../services/FileService';
+import FileUploader from './FileUploader';
+import UploadProgress from './UploadProgress';
 
 const FileUpload = () => {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
   const [uploadResult, setUploadResult] = useState(null);
+  const [cancelUpload, setCancelUpload] = useState(false);
   const [shareSettings, setShareSettings] = useState({
     usePassword: false,
     password: '',
@@ -43,81 +45,31 @@ const FileUpload = () => {
     };
   }, [uploadResult, errorTimer]);
   
-  // ファイルの最大サイズのチェック
-  const checkFilesSize = (files) => {
-    const maxTotalSize = 2 * 1024 * 1024 * 1024; // 2GB
-    let totalSize = 0;
-    
-    for (const file of files) {
-      totalSize += file.size;
-    }
-    
-    return totalSize <= maxTotalSize;
-  };
-  
-  // ファイル選択時の処理
-  const handleFileChange = (e) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
-      
-      // ファイルサイズのチェック
-      if (!checkFilesSize([...files, ...newFiles])) {
-        setUploadResult({
-          success: false,
-          message: 'ファイルの合計サイズが上限（2GB）を超えています。'
-        });
-        return;
-      }
-      
-      setFiles(prevFiles => [...prevFiles, ...newFiles]);
-    }
-  };
-  
-  // ファイルドロップ時の処理
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (e.dataTransfer.files) {
-      const newFiles = Array.from(e.dataTransfer.files);
-      
-      // ファイルサイズのチェック
-      if (!checkFilesSize([...files, ...newFiles])) {
-        setUploadResult({
-          success: false,
-          message: 'ファイルの合計サイズが上限（2GB）を超えています。'
-        });
-        return;
-      }
-      
-      setFiles(prevFiles => [...prevFiles, ...newFiles]);
-    }
-  }, [files]);
-  
-  // ドラッグオーバー時のデフォルト動作を防止
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // ファイルの選択処理
+  const handleFilesSelected = useCallback((selectedFiles) => {
+    setFiles(prevFiles => [...prevFiles, ...selectedFiles]);
+    // 選択後にアップロード結果をリセット
+    setUploadResult(null);
   }, []);
   
-  // 選択したファイルの削除
-  const removeFile = (index) => {
+  // ファイルの削除処理
+  const handleRemoveFile = useCallback((index) => {
     setFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
-  };
+  }, []);
+  
+  // アップロードキャンセル
+  const handleCancelUpload = useCallback(() => {
+    setCancelUpload(true);
+  }, []);
   
   // 共有設定の変更
-  const handleSettingChange = (e) => {
+  const handleSettingChange = useCallback((e) => {
     const { name, value, type, checked } = e.target;
     setShareSettings(prev => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
-  };
-
-  // ファイルの拡張子を取得
-  const getFileExtension = (filename) => {
-    return filename.slice((filename.lastIndexOf(".") - 1 >>> 0) + 2);
-  };
+  }, []);
   
   // ファイルアップロード
   const handleUpload = async () => {
@@ -125,87 +77,75 @@ const FileUpload = () => {
     
     setUploading(true);
     setUploadResult(null);
+    setUploadProgress({});
+    setCancelUpload(false);
     
     try {
-      const groupId = uuidv4(); // ファイルグループのID
-      const uploadedFiles = [];
+      const groupId = uuidv4();
       
-      // ファイルごとにアップロード
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const fileId = uuidv4();
-        const extension = getFileExtension(file.name);
-        const key = `uploads/${currentUser.username}/${groupId}/${fileId}.${extension}`;
-        
-        // アップロードプログレスの監視
+      // 進捗コールバック
+      const progressCallback = (index, progress) => {
         setUploadProgress(prev => ({
           ...prev,
-          [i]: 0
+          [index]: Math.round((progress.loaded / progress.total) * 100)
         }));
-        
-        // S3にアップロード
-        await Storage.put(key, file, {
-          contentType: file.type,
-          progressCallback(progress) {
-            const percentUploaded = Math.round((progress.loaded / progress.total) * 100);
-            setUploadProgress(prev => ({
-              ...prev,
-              [i]: percentUploaded
-            }));
-          },
-          metadata: {
-            fileId,
-            groupId,
-            originalName: file.name,
-            contentType: file.type,
-            size: file.size.toString()
-          }
+      };
+      
+      // キャンセルチェックコールバック
+      const cancelCheckCallback = () => cancelUpload;
+      
+      // ファイルのアップロード
+      const uploadResult = await fileService.uploadMultipleFiles(
+        files,
+        currentUser.username,
+        groupId,
+        progressCallback,
+        cancelCheckCallback
+      );
+      
+      if (cancelUpload) {
+        setUploadResult({
+          success: false,
+          message: 'アップロードがキャンセルされました'
         });
-        
-        uploadedFiles.push({
-          fileId,
-          key,
-          name: file.name,
-          size: file.size,
-          type: file.type
-        });
+        return;
       }
       
       // メタデータをAPIに保存
-      const metadataResponse = await saveFileGroupMetadata(groupId, uploadedFiles, shareSettings);
+      const metadataResponse = await fileService.saveFileGroupMetadata(
+        uploadResult.groupId,
+        uploadResult.files,
+        shareSettings
+      );
       
       // アップロード成功
       setUploadResult({
         success: true,
         message: `${files.length}個のファイルがアップロードされました`,
-        groupId,
+        groupId: uploadResult.groupId,
         shareUrl: metadataResponse.shareUrl
       });
       
       // 入力をリセット
       setFiles([]);
-      setUploadProgress({});
       
     } catch (error) {
       console.error('Upload error:', error);
-      setUploadResult({
-        success: false,
-        message: `エラーが発生しました: ${error.message || 'アップロードに失敗しました'}`
-      });
+      
+      if (cancelUpload) {
+        setUploadResult({
+          success: false,
+          message: 'アップロードがキャンセルされました'
+        });
+      } else {
+        setUploadResult({
+          success: false,
+          message: `エラーが発生しました: ${error.message || 'アップロードに失敗しました'}`
+        });
+      }
     } finally {
       setUploading(false);
-    }
-  };
-  
-  // メタデータをAPIに保存
-  const saveFileGroupMetadata = async (groupId, files, settings) => {
-    try {
-      // FileServiceを直接使用してメタデータを保存
-      const response = await fileService.saveFileGroupMetadata(groupId, files, settings);
-      return response;
-    } catch (error) {
-      console.error('Error saving metadata:', error);
-      throw error;
+      setCancelUpload(false);
     }
   };
   
@@ -213,81 +153,25 @@ const FileUpload = () => {
     <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
       <h2 className="text-xl font-semibold mb-4">ファイルアップロード</h2>
       
-      {/* ドラッグ&ドロップエリア */}
-      <div 
-        className={`border-2 border-dashed rounded-lg p-8 text-center mb-4 ${
-          files.length > 0 ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400'
-        }`}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-      >
-        <div className="flex flex-col items-center justify-center">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-          </svg>
-          <p className="mb-2 text-sm text-gray-500">
-            <span className="font-semibold">クリックしてファイルを選択</span>
-            <span>またはドラッグ&ドロップ</span>
-          </p>
-          <p className="text-xs text-gray-500">
-            サポートされているすべてのファイル形式（最大合計サイズ: 2GB）
-          </p>
-          <input
-            id="fileInput"
-            type="file"
-            multiple
-            onChange={handleFileChange}
-            className="hidden"
-          />
-          <button
-            onClick={() => document.getElementById('fileInput').click()}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={uploading}
-          >
-            ファイルを選択
-          </button>
-        </div>
-      </div>
+      {/* ファイルアップローダーコンポーネント */}
+      {!uploading && (
+        <FileUploader
+          onFilesSelected={handleFilesSelected}
+          maxFileSize={2 * 1024 * 1024 * 1024} // 2GB
+          className="mb-4"
+        />
+      )}
       
-      {/* 選択されたファイル一覧 */}
+      {/* 選択されたファイル一覧とアップロード進捗 */}
       {files.length > 0 && (
         <div className="mb-6">
-          <h3 className="text-md font-medium mb-2">選択されたファイル ({files.length})</h3>
-          <ul className="space-y-2">
-            {files.map((file, index) => (
-              <li key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded">
-                <div className="flex items-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <div>
-                    <p className="text-sm font-medium text-gray-700">{file.name}</p>
-                    <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
-                  </div>
-                </div>
-                {uploading ? (
-                  <div className="w-24">
-                    <div className="h-2 bg-gray-200 rounded">
-                      <div 
-                        className="h-full bg-blue-600 rounded" 
-                        style={{ width: `${uploadProgress[index] || 0}%` }}
-                      ></div>
-                    </div>
-                    <p className="text-xs text-right mt-1">{uploadProgress[index] || 0}%</p>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => removeFile(index)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <UploadProgress
+            files={files}
+            progress={uploadProgress}
+            onCancelUpload={handleCancelUpload}
+            onRemoveFile={handleRemoveFile}
+            uploading={uploading}
+          />
         </div>
       )}
       
@@ -369,18 +253,14 @@ const FileUpload = () => {
       )}
       
       {/* アップロードボタン */}
-      {files.length > 0 && (
+      {files.length > 0 && !uploading && (
         <div className="flex justify-end">
           <button
             onClick={handleUpload}
-            disabled={uploading || files.length === 0}
-            className={`px-6 py-2 rounded font-medium ${
-              uploading 
-                ? 'bg-gray-400 text-white cursor-not-allowed' 
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
+            disabled={files.length === 0}
+            className="px-6 py-2 rounded font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
-            {uploading ? 'アップロード中...' : 'アップロード'}
+            アップロード
           </button>
         </div>
       )}
@@ -421,7 +301,7 @@ const FileUpload = () => {
                         navigator.clipboard.writeText(uploadResult.shareUrl);
                         alert('URLをコピーしました');
                       }}
-                      className="bg-blue-600 text-white px-2 rounded-r"
+                      className="bg-blue-600 text-white px-2 rounded-r hover:bg-blue-700 transition-colors"
                     >
                       コピー
                     </button>
