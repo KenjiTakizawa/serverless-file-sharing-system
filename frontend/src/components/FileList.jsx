@@ -1,31 +1,28 @@
 // src/components/FileList.jsx
 import React, { useState, useEffect } from 'react';
-import fileService from '../services/FileService';
+import { useNavigate } from 'react-router-dom';
+import { useFiles } from '../contexts/FileContext';
+import ShareLinkGenerator from './ShareLinkGenerator';
 
 const FileList = () => {
-  const [fileGroups, setFileGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showExpired, setShowExpired] = useState(false);
+  const { 
+    fileGroups, 
+    loading, 
+    error, 
+    showExpired, 
+    setShowExpired, 
+    fetchFileGroups,
+    deleteFileGroup
+  } = useFiles();
+  
+  const navigate = useNavigate();
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [showShareGenerator, setShowShareGenerator] = useState(false);
   
   // ファイルグループの取得
   useEffect(() => {
-    const fetchFileGroups = async () => {
-      try {
-        setLoading(true);
-        const groups = await fileService.getFileGroups(showExpired);
-        setFileGroups(groups);
-        setError(null);
-      } catch (err) {
-        console.error('Error fetching file groups:', err);
-        setError('ファイル一覧の取得に失敗しました');
-      } finally {
-        setLoading(false);
-      }
-    };
-    
     fetchFileGroups();
-  }, [showExpired]);
+  }, [fetchFileGroups, showExpired]);
   
   // 日付のフォーマット
   const formatDate = (dateString) => {
@@ -73,6 +70,17 @@ const FileList = () => {
     alert('共有リンクをコピーしました');
   };
   
+  // 共有リンク生成画面を表示
+  const handleShareGroup = (group) => {
+    setSelectedGroup(group);
+    setShowShareGenerator(true);
+  };
+  
+  // 詳細ページへ移動
+  const handleViewDetails = (groupId) => {
+    navigate(`/files/${groupId}`);
+  };
+  
   // ファイルグループの削除
   const handleDeleteGroup = async (groupId) => {
     if (!window.confirm('このファイルグループを削除してもよろしいですか？この操作は元に戻せません。')) {
@@ -80,9 +88,7 @@ const FileList = () => {
     }
     
     try {
-      await fileService.deleteFileGroup(groupId);
-      // 一覧を更新
-      setFileGroups(prevGroups => prevGroups.filter(group => group.groupId !== groupId));
+      await deleteFileGroup(groupId);
     } catch (err) {
       console.error('Error deleting file group:', err);
       alert('ファイルグループの削除に失敗しました');
@@ -207,10 +213,16 @@ const FileList = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button
-                        onClick={() => copyShareLink(group.shareUrl)}
-                        className="text-blue-600 hover:text-blue-900 mr-4"
+                        onClick={() => handleViewDetails(group.groupId)}
+                        className="text-blue-600 hover:text-blue-900 mr-3"
                       >
-                        リンクコピー
+                        詳細
+                      </button>
+                      <button
+                        onClick={() => handleShareGroup(group)}
+                        className="text-green-600 hover:text-green-900 mr-3"
+                      >
+                        共有
                       </button>
                       <button
                         onClick={() => handleDeleteGroup(group.groupId)}
@@ -224,6 +236,33 @@ const FileList = () => {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      
+      {/* 共有リンク生成画面 */}
+      {showShareGenerator && selectedGroup && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center p-6 border-b">
+              <h3 className="text-lg font-semibold">ファイル共有設定</h3>
+              <button
+                onClick={() => setShowShareGenerator(false)}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <ShareLinkGenerator 
+                fileGroupId={selectedGroup.groupId} 
+                shareUrl={selectedGroup.shareUrl} 
+                onShareStatusChange={() => fetchFileGroups()}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

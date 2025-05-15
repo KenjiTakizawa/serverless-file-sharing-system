@@ -1,6 +1,7 @@
 // src/contexts/FileContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import fileService from '../services/FileService';
+import shareService from '../services/shareService';
 import { useAuth } from './AuthContext';
 
 // FileContext作成
@@ -131,6 +132,36 @@ export const FileProvider = ({ children }) => {
     return `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(url)}`;
   };
 
+  // 共有リンクを生成
+  const generateShareLink = async (fileGroupId, shareSettings) => {
+    try {
+      return await shareService.generateShareLink(fileGroupId, shareSettings);
+    } catch (err) {
+      console.error('Error generating share link:', err);
+      throw err;
+    }
+  };
+
+  // メールで共有リンクを送信
+  const sendShareEmail = async (fileGroupId, recipients, subject, message) => {
+    try {
+      return await shareService.sendShareEmail(fileGroupId, recipients, subject, message);
+    } catch (err) {
+      console.error('Error sending share email:', err);
+      throw err;
+    }
+  };
+
+  // 共有リンクのアクセス状況を取得
+  const getShareStats = async (fileGroupId) => {
+    try {
+      return await shareService.getShareStats(fileGroupId);
+    } catch (err) {
+      console.error('Error getting share stats:', err);
+      throw err;
+    }
+  };
+
   // コンテキスト値
   const value = {
     fileGroups,
@@ -148,7 +179,10 @@ export const FileProvider = ({ children }) => {
     getDownloadUrl,
     canPreviewFile,
     copyShareUrl,
-    getQRCodeUrl
+    getQRCodeUrl,
+    generateShareLink,
+    sendShareEmail,
+    getShareStats
   };
 
   return (
