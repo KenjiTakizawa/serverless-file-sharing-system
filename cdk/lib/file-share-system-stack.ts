@@ -465,6 +465,9 @@ export class FileShareSystemStack extends cdk.Stack {
         FILE_GROUPS_TABLE: fileGroupsTable.tableName,
         FILES_TABLE: filesTable.tableName,
         ACCESS_PERMISSIONS_TABLE: accessPermissionsTable.tableName,
+        ACCESS_LOGS_TABLE: accessLogsTable.tableName,
+        ADMIN_EMAIL_TOPIC: this.node.tryGetContext('adminEmailTopic') || '',
+        LOG_RETENTION_DAYS: '90',
       },
       timeout: cdk.Duration.minutes(15),
       memorySize: 512,
@@ -475,15 +478,20 @@ export class FileShareSystemStack extends cdk.Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: [
+          'dynamodb:GetItem',
+          'dynamodb:PutItem',
           'dynamodb:Query',
           'dynamodb:Scan',
           'dynamodb:UpdateItem',
+          'dynamodb:DeleteItem',
         ],
         resources: [
           fileGroupsTable.tableArn,
           filesTable.tableArn,
+          accessLogsTable.tableArn,
           `${fileGroupsTable.tableArn}/index/*`,
           `${filesTable.tableArn}/index/*`,
+          `${accessLogsTable.tableArn}/index/*`,
         ],
       })
     );
@@ -493,10 +501,31 @@ export class FileShareSystemStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: [
           's3:DeleteObject',
+          's3:PutObject',
+          's3:GetObject',
         ],
         resources: [
+          fileStorageBucket.bucketArn,
           `${fileStorageBucket.bucketArn}/*`,
         ],
+      })
+    );
+    
+    // CloudWatchメトリクス発行権限
+    cleanupHandler.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['cloudwatch:PutMetricData'],
+        resources: ['*'],
+      })
+    );
+    
+    // SNS通知送信権限
+    cleanupHandler.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['sns:Publish'],
+        resources: ['*'], // 実際の環境では特定のSNSトピックARNに限定することをお勧めします
       })
     );
 
